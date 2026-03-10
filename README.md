@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <div align="center">
 
 <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=32&duration=3000&pause=1000&color=A78BFA&center=true&vCenter=true&multiline=true&width=700&height=100&lines=🔍+Find+Your+Photo;AI-Powered+Face+Recognition" alt="Typing SVG" />
@@ -278,3 +279,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 *Find Your Photo — Because every moment deserves to be found.* 🌟
 
 </div>
+=======
+# find-your-photo
+>>>>>>> a9b5bb54962202d2534ab3ecaef73833f4f68e73

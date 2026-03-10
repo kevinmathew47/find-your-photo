@@ -188,7 +188,7 @@ export default function LandingPage() {
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
       ]);
 
-      // Fetch photos
+      // Fetch photos – now returns full URLs (Cloudinary or /photos/file.jpg)
       const res = await fetch("/api/face-previews");
       if (!res.ok) return;
       const { photos } = (await res.json()) as { photos: string[] };
@@ -209,23 +209,26 @@ export default function LandingPage() {
         const batch = photos.slice(i, i + BATCH);
 
         await Promise.all(
-          batch.map(async (filename) => {
+          batch.map(async (photoUrl) => {
+            // photoUrl is a full URL: either /photos/file.jpg (local) or https://res.cloudinary.com/...
+            // Use URL as the cache key so it works for both local and Cloudinary
+            const cacheKey = photoUrl;
             try {
               // --- Load image first (always needed for canvas crop) ---
               const img = new Image();
               img.crossOrigin = "anonymous";
-              img.src = `/photos/${filename}`;
+              img.src = photoUrl;
               await new Promise<void>((resolve, reject) => {
                 img.onload = () => resolve();
                 img.onerror = () => reject();
-                setTimeout(() => reject(), 8000);
+                setTimeout(() => reject(), 10000);
               });
 
               let descriptors: number[][];
               let faceBoxes: { x: number; y: number; width: number; height: number }[];
 
               // --- Cache check (v4: has faceBoxes) ---
-              const cached = db ? await getCached(db, filename) : null;
+              const cached = db ? await getCached(db, cacheKey) : null;
 
               if (cached) {
                 // Perfect cache hit: use stored descriptors AND boxes directly
@@ -258,7 +261,7 @@ export default function LandingPage() {
 
                 // Cache both descriptors AND faceBoxes for instant reuse
                 if (db && descriptors.length > 0) {
-                  await putCached(db, { filename, descriptors, faceBoxes });
+                  await putCached(db, { filename: cacheKey, descriptors, faceBoxes });
                 }
               }
 
@@ -275,8 +278,8 @@ export default function LandingPage() {
                   const cropDataUrl = buildCropDataUrl(img, box, 180);
                   clusters.push({
                     id: clusters.length,
-                    photoFilename: filename,
-                    photoUrl: `/photos/${filename}`,
+                    photoFilename: photoUrl.split("/").pop() || photoUrl,
+                    photoUrl: photoUrl,
                     descriptor: desc,
                     faceBox: box,
                     imgNaturalWidth: img.naturalWidth,
