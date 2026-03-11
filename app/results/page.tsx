@@ -20,7 +20,7 @@ type Status = "loading" | "matching" | "done" | "no-match" | "error";
 
 // ── IndexedDB cache helpers ────────────────────────────────────────────────
 const DB_NAME = "photo-finder-cache";
-const DB_VERSION = 4;
+const DB_VERSION = 2;
 const STORE = "descriptors";
 
 function openDB(): Promise<IDBDatabase> {
@@ -121,23 +121,23 @@ export default function ResultsPage() {
     async (
       faceapi: typeof import("face-api.js"),
       db: IDBDatabase | null,
-      photoUrl: string
-    ): Promise<{ photoUrl: string; descriptors: number[][]; fromCache: boolean }> => {
-      // 1. Try cache first (key = full URL)
+      filename: string
+    ): Promise<{ filename: string; descriptors: number[][]; fromCache: boolean }> => {
+      // 1. Try cache first
       if (db) {
-        const cached = await getCached(db, photoUrl);
+        const cached = await getCached(db, filename);
         if (cached) {
-          return { photoUrl, descriptors: cached.descriptors, fromCache: true };
+          return { filename, descriptors: cached.descriptors, fromCache: true };
         }
       }
 
       // 2. Load image and detect faces
       const img = new Image();
       img.crossOrigin = "anonymous";
-      img.src = photoUrl;
+      img.src = `/photos/${filename}`;
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
-        img.onerror = () => reject(new Error(`Failed to load ${photoUrl}`));
+        img.onerror = () => reject(new Error(`Failed to load ${filename}`));
         setTimeout(() => reject(new Error("timeout")), 12000);
       });
 
@@ -146,10 +146,10 @@ export default function ResultsPage() {
 
       // Cache for next time
       if (db && descriptors.length > 0) {
-        await putCached(db, { filename: photoUrl, descriptors });
+        await putCached(db, { filename, descriptors });
       }
 
-      return { photoUrl, descriptors, fromCache: false };
+      return { filename, descriptors, fromCache: false };
     },
     [detectAllFacesHighAccuracy]
   );
@@ -193,7 +193,7 @@ export default function ResultsPage() {
       setStatusMsg("Fetching event photos...");
       const res = await fetch("/api/list-photos");
       if (!res.ok) throw new Error("Failed to list photos");
-      const { photos } = await res.json() as { photos: { url: string; filename: string }[] };
+      const { photos } = await res.json() as { photos: string[] };
 
       if (!photos.length) {
         setStatus("no-match");
@@ -212,7 +212,7 @@ export default function ResultsPage() {
       const found: MatchedPhoto[] = [];
 
       // ── Helper: match descriptors against selfie ──
-      const matchDescriptors = (photoUrl: string, filename: string, descriptors: number[][]) => {
+      const matchDescriptors = (filename: string, descriptors: number[][]) => {
         let bestDistance = Infinity;
         for (const desc of descriptors) {
           const d = faceapi!.euclideanDistance(selfieDescriptor, new Float32Array(desc));
@@ -222,7 +222,7 @@ export default function ResultsPage() {
           const similarity = computeSimilarity(bestDistance, effectiveThreshold);
           found.push({
             filename,
-            url: photoUrl,
+            url: `/photos/${filename}`,
             distance: bestDistance,
             similarity,
             confidence: Math.round((1 - bestDistance) * 100),
@@ -235,20 +235,18 @@ export default function ResultsPage() {
 
       // ── PASS 1: Instant cache check (blazing fast) ──
       setStatusMsg("⚡ Checking cached faces...");
-      const uncachedPhotos: { url: string; filename: string }[] = [];
-      for (const photo of photos) {
-        const photoUrl = photo.url;
-        const filename = photo.filename;
+      const uncachedPhotos: string[] = [];
+      for (const filename of photos) {
         if (db) {
-          const cached = await getCached(db, photoUrl);
+          const cached = await getCached(db, filename);
           if (cached && cached.descriptors.length > 0) {
             cHits++;
-            matchDescriptors(photoUrl, filename, cached.descriptors);
+            matchDescriptors(filename, cached.descriptors);
             processed++;
             continue;
           }
         }
-        uncachedPhotos.push(photo);
+        uncachedPhotos.push(filename);
       }
       setCacheHits(cHits);
       setProgress(cHits > 0 ? Math.round((processed / photos.length) * 100) : 0);
@@ -263,16 +261,15 @@ export default function ResultsPage() {
         const batch = uncachedPhotos.slice(i, i + BATCH_SIZE);
 
         const results = await Promise.allSettled(
-          batch.map((photo) => processPhoto(faceapi!, db, photo.url))
+          batch.map((filename) => processPhoto(faceapi!, db, filename))
         );
 
         for (const result of results) {
           if (result.status === "fulfilled") {
-            const { photoUrl: pUrl, descriptors, fromCache } = result.value;
-            const matchedPhoto = batch.find((p) => p.url === pUrl);
+            const { filename, descriptors, fromCache } = result.value;
             if (fromCache) cHits++;
             if (descriptors.length > 0) {
-              matchDescriptors(pUrl, matchedPhoto?.filename || pUrl.split("/").pop() || pUrl, descriptors);
+              matchDescriptors(filename, descriptors);
             }
           }
           processed++;
